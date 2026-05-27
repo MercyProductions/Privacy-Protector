@@ -5,6 +5,7 @@
 #include "../common/setup_common.h"
 #include "../common/system_probe.h"
 #include "../common/fresh_pc_readiness.h"
+#include "../common/registry_privacy_baseline.h"
 
 #include <windows.h>
 
@@ -45,7 +46,7 @@ bool ParseArgs(int argc, char** argv, Options& options) {
 }
 
 SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, const SetupProbe::StorageProbe& storage,
-    const FreshPc::FreshReadiness& readiness) {
+    const SetupProbe::DeviceInventoryProbe& inventory, const FreshPc::FreshReadiness& readiness) {
     SetupCommon::PlanDocument doc;
     doc.name = "EFI/UEFI Boot Privacy Setup";
     doc.purpose = "Prepare a trusted boot path for clean installs and privacy-sensitive maintenance without changing firmware from this tool.";
@@ -78,6 +79,11 @@ SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, c
             readiness.blockers.empty() ? "ok" : "review-required"
         },
         {
+            "Review boot-time device inventory",
+            "Read-only inventory captured " + std::to_string(inventory.devices.size()) + " present Plug and Play devices, including storage, USB, HID, keyboard, mouse, display, network, firmware, and system surfaces where Windows reports them.",
+            inventory.error.empty() ? "informational" : "review"
+        },
+        {
             "Boot trusted install media",
             "Use a known-good Windows installer USB, choose the UEFI boot entry for that USB, and avoid unknown recovery images.",
             "required"
@@ -100,6 +106,11 @@ SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, c
         {
             "Enable BitLocker deliberately",
             "After updates and drivers are stable, enable BitLocker with recovery keys stored offline before adding sensitive files.",
+            "recommended"
+        },
+        {
+            "Stage registry privacy baseline",
+            "Review registry_privacy_baseline.txt for settings to import after Windows is installed and the fresh user profile exists.",
             "recommended"
         },
     };
@@ -136,6 +147,12 @@ SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, c
         { "hardware_readiness.json", "Machine-readable hardware readiness report.", "generated" },
         { "fresh_pc_readiness.txt", "Fresh boot readiness score, blockers, and next actions.", "generated" },
         { "fresh_pc_readiness.json", "Machine-readable Fresh boot readiness report.", "generated" },
+        { "device_inventory.txt", "Read-only inventory of present internal and peripheral device surfaces.", "generated" },
+        { "device_inventory.json", "Machine-readable device inventory report.", "generated" },
+        { "registry_privacy_baseline.txt", "Registry privacy settings guide for review before import.", "generated" },
+        { "registry_privacy_baseline.reg", "Current-user registry privacy baseline.", "generated" },
+        { "registry_admin_policy_baseline.reg", "Optional Administrator machine-policy privacy baseline.", "generated" },
+        { "apply_registry_user_baseline.cmd", "Command template to import the current-user registry baseline.", "generated" },
     };
 
     return doc;
@@ -155,6 +172,7 @@ int main(int argc, char** argv) {
 
     SetupProbe::SecurityProbe security = SetupProbe::ProbeSecurity();
     SetupProbe::StorageProbe storage = SetupProbe::ProbeStorage();
+    SetupProbe::DeviceInventoryProbe inventory = SetupProbe::ProbeDeviceInventory();
     FreshPc::FreshReadiness readiness = FreshPc::Build(FreshPc::ProjectKind::EfiBoot, security, storage);
 
     std::filesystem::path outputDir = SetupCommon::ResolveOutputDir(options.outputDir, "efi_boot");
@@ -163,7 +181,7 @@ int main(int argc, char** argv) {
     std::string error;
 
     if (!SetupCommon::WritePlanBundle(outputDir, "efi_boot_privacy_plan",
-        BuildPlan(security, storage, readiness), textPath, jsonPath, error)) {
+        BuildPlan(security, storage, inventory, readiness), textPath, jsonPath, error)) {
         std::cerr << "[!] Failed to write setup plan: " << error << "\n";
         return 1;
     }
@@ -181,11 +199,32 @@ int main(int argc, char** argv) {
         std::cerr << "[!] Failed to write Fresh boot readiness report: " << error << "\n";
         return 1;
     }
+    if (!SetupCommon::WriteTextFile(outputDir / "device_inventory.txt",
+            SetupProbe::BuildDeviceInventoryText(inventory), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "device_inventory.json",
+            SetupProbe::BuildDeviceInventoryJson(inventory), error)) {
+        std::cerr << "[!] Failed to write device inventory report: " << error << "\n";
+        return 1;
+    }
+    if (!SetupCommon::WriteTextFile(outputDir / "registry_privacy_baseline.txt",
+            RegistryPrivacy::BuildGuideText(), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "registry_privacy_baseline.reg",
+            RegistryPrivacy::BuildUserRegFile(), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "registry_admin_policy_baseline.reg",
+            RegistryPrivacy::BuildAdminPolicyRegFile(), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "apply_registry_user_baseline.cmd",
+            RegistryPrivacy::BuildApplyUserCommand(), error)) {
+        std::cerr << "[!] Failed to write registry privacy baseline: " << error << "\n";
+        return 1;
+    }
 
     SetupCommon::PrintGenerated(outputDir, textPath, jsonPath);
     std::cout << "  Hardware readiness: " << (outputDir / "hardware_readiness.txt").string() << "\n";
     std::cout << "  Fresh boot readiness: " << (outputDir / "fresh_pc_readiness.txt").string()
               << " (" << readiness.percent << "%)\n";
+    std::cout << "  Device inventory: " << (outputDir / "device_inventory.txt").string()
+              << " (" << inventory.devices.size() << " devices)\n";
+    std::cout << "  Registry baseline: " << (outputDir / "registry_privacy_baseline.txt").string() << "\n";
     std::cout << "  Firmware: " << security.secureBoot.firmwareType << "\n"
               << "  Secure Boot: " << security.secureBoot.state << "\n"
               << "  TPM present: " << security.tpm.present << "\n"

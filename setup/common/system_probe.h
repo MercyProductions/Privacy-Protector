@@ -84,6 +84,19 @@ struct StorageProbe {
     std::string error;
 };
 
+struct DeviceProbe {
+    std::string className;
+    std::string friendlyName;
+    std::string instanceId;
+    std::string manufacturer;
+    std::string status;
+};
+
+struct DeviceInventoryProbe {
+    std::vector<DeviceProbe> devices;
+    std::string error;
+};
+
 inline std::wstring Utf8ToWide(const std::string& value) {
     if (value.empty()) {
         return {};
@@ -215,6 +228,7 @@ inline CommandResult CapturePowerShell(const std::string& script) {
     std::wstring wideScript = Utf8ToWide(script);
     std::wstring command = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ";
     command += L"\"";
+    command += L"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ";
     for (wchar_t ch : wideScript) {
         if (ch == L'"') {
             command += L'\\';
@@ -485,8 +499,124 @@ inline StorageProbe ProbeStorage() {
     return probe;
 }
 
+inline DeviceInventoryProbe ProbeDeviceInventory() {
+    DeviceInventoryProbe probe;
+    CommandResult result = CapturePowerShell(
+        "try { "
+        "$classes=@('Battery','Biometric','Bluetooth','Camera','Computer','DiskDrive','Display','Firmware','HIDClass','Image','Keyboard','Media','Monitor','Mouse','Net','Ports','Processor','SCSIAdapter','SDHost','SecurityDevices','Sensor','SoftwareDevice','System','USB'); "
+        "Get-PnpDevice -PresentOnly -ErrorAction Stop | "
+        "Where-Object { $classes -contains $_.Class } | "
+        "Sort-Object Class,FriendlyName,InstanceId | "
+        "ForEach-Object { "
+        "( @($_.Class,$_.FriendlyName,$_.InstanceId,$_.Manufacturer,$_.Status) | "
+        "ForEach-Object { ([string]$_).Replace([char]31, ' ') } ) -join [char]31 "
+        "} "
+        "} catch { 'Error=' + $_.Exception.Message }");
+
+    if (!result.started) {
+        probe.error = "failed to start PowerShell";
+        return probe;
+    }
+
+    for (const auto& line : Lines(result.output)) {
+        if (line.rfind("Error=", 0) == 0) {
+            probe.error = Trim(line.substr(6));
+            continue;
+        }
+
+        auto parts = Split(line, '\x1f');
+        if (parts.size() < 5) {
+            continue;
+        }
+
+        probe.devices.push_back({ parts[0], parts[1], parts[2], parts[3], parts[4] });
+    }
+    return probe;
+}
+
 inline std::string YesNo(bool value) {
     return value ? "yes" : "no";
+}
+
+inline std::string BuildDeviceInventoryText(const DeviceInventoryProbe& inventory) {
+    std::ostringstream out;
+    out << "Device Inventory Probe\n";
+    out << "======================\n";
+    out << "Created: " << SetupCommon::TimestampIso() << "\n\n";
+    out << "Scope\n";
+    out << "-----\n";
+    out << "This report inventories visible Windows Plug and Play devices for privacy planning.\n";
+    out << "It does not alter, virtualize, spoof, hide, or intercept hardware identifiers.\n\n";
+
+    if (!inventory.error.empty()) {
+        out << "Probe note: " << inventory.error << "\n\n";
+    }
+
+    std::map<std::string, size_t> counts;
+    for (const auto& device : inventory.devices) {
+        counts[device.className.empty() ? "Unknown" : device.className] += 1;
+    }
+
+    out << "Summary\n";
+    out << "-------\n";
+    out << "Devices reported: " << inventory.devices.size() << "\n";
+    if (counts.empty()) {
+        out << "No present devices were reported by Get-PnpDevice.\n";
+    } else {
+        for (const auto& item : counts) {
+            out << "- " << item.first << ": " << item.second << "\n";
+        }
+    }
+
+    out << "\nDevices\n";
+    out << "-------\n";
+    if (inventory.devices.empty()) {
+        out << "No device inventory entries were collected.\n";
+    } else {
+        for (const auto& device : inventory.devices) {
+            std::string name = device.friendlyName.empty() ? device.instanceId : device.friendlyName;
+            out << "- " << name << "\n";
+            out << "  Class: " << (device.className.empty() ? "Unknown" : device.className) << "\n";
+            out << "  Status: " << (device.status.empty() ? "Unknown" : device.status) << "\n";
+            if (!device.manufacturer.empty()) {
+                out << "  Manufacturer: " << device.manufacturer << "\n";
+            }
+            if (!device.instanceId.empty()) {
+                out << "  Instance ID: " << device.instanceId << "\n";
+            }
+        }
+    }
+
+    out << "\nGuidance\n";
+    out << "--------\n";
+    out << "- For a new fresh PC boundary, install only trusted drivers and pair peripherals deliberately.\n";
+    out << "- For runtime privacy, prefer Windows Sandbox or a VM when host device identifiers must not be shared with an app.\n";
+    out << "- For reinstall planning, save required storage, network, keyboard, and mouse drivers before deleting partitions.\n";
+    return out.str();
+}
+
+inline std::string BuildDeviceInventoryJson(const DeviceInventoryProbe& inventory) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"schemaVersion\": 1,\n";
+    out << "  \"createdAt\": \"" << SetupCommon::JsonEscape(SetupCommon::TimestampIso()) << "\",\n";
+    out << "  \"scope\": \"read-only Windows Plug and Play device inventory\",\n";
+    out << "  \"boundary\": \"does not alter, virtualize, spoof, hide, or intercept hardware identifiers\",\n";
+    out << "  \"error\": \"" << SetupCommon::JsonEscape(inventory.error) << "\",\n";
+    out << "  \"devices\": [\n";
+    for (size_t i = 0; i < inventory.devices.size(); ++i) {
+        const auto& device = inventory.devices[i];
+        out << "    {\n";
+        out << "      \"className\": \"" << SetupCommon::JsonEscape(device.className) << "\",\n";
+        out << "      \"friendlyName\": \"" << SetupCommon::JsonEscape(device.friendlyName) << "\",\n";
+        out << "      \"instanceId\": \"" << SetupCommon::JsonEscape(device.instanceId) << "\",\n";
+        out << "      \"manufacturer\": \"" << SetupCommon::JsonEscape(device.manufacturer) << "\",\n";
+        out << "      \"status\": \"" << SetupCommon::JsonEscape(device.status) << "\"\n";
+        out << "    }" << (i + 1 == inventory.devices.size() ? "\n" : ",\n");
+    }
+    out << "  ]\n";
+    out << "}\n";
+    return out.str();
 }
 
 inline std::string BuildReadinessText(const SecurityProbe& security, const StorageProbe& storage) {

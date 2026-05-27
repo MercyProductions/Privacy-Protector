@@ -1,6 +1,7 @@
 #include "../common/setup_common.h"
 #include "../common/system_probe.h"
 #include "../common/fresh_pc_readiness.h"
+#include "../common/registry_privacy_baseline.h"
 
 #include <filesystem>
 #include <iostream>
@@ -61,7 +62,7 @@ std::string HardwareSummary(const SetupProbe::SecurityProbe& security, const Set
 }
 
 SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, const SetupProbe::StorageProbe& storage,
-    const FreshPc::FreshReadiness& readiness) {
+    const SetupProbe::DeviceInventoryProbe& inventory, const FreshPc::FreshReadiness& readiness) {
     SetupCommon::PlanDocument doc;
     doc.name = "Clean Reinstall Privacy Setup";
     doc.purpose = "Prepare a Windows reinstall where no old user files, app state, browser profiles, or account caches are carried forward.";
@@ -89,6 +90,11 @@ SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, c
             readiness.blockers.empty() ? "ok" : "review-required"
         },
         {
+            "Review device and peripheral inventory",
+            "Read-only inventory captured " + std::to_string(inventory.devices.size()) + " present Plug and Play devices, including internal, USB, HID, keyboard, mouse, display, network, and system surfaces where Windows reports them.",
+            inventory.error.empty() ? "informational" : "review"
+        },
+        {
             "Disconnect network for first boot",
             "Install Windows offline when possible, then connect only after local privacy settings and updates are staged.",
             "recommended"
@@ -105,7 +111,7 @@ SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, c
         },
         {
             "Post-install privacy baseline",
-            "Disable advertising ID, tailored experiences, unnecessary diagnostics, app launch tracking, clipboard sync, and account/device sync features you do not need.",
+            "Review registry_privacy_baseline.txt, then optionally import registry_privacy_baseline.reg after the new local profile is created.",
             "required"
         },
     };
@@ -149,6 +155,12 @@ SetupCommon::PlanDocument BuildPlan(const SetupProbe::SecurityProbe& security, c
         { "hardware_readiness.json", "Machine-readable hardware readiness report.", "generated" },
         { "fresh_pc_readiness.txt", "Fresh PC readiness score, blockers, and next actions.", "generated" },
         { "fresh_pc_readiness.json", "Machine-readable Fresh PC readiness report.", "generated" },
+        { "device_inventory.txt", "Read-only inventory of present internal and peripheral device surfaces.", "generated" },
+        { "device_inventory.json", "Machine-readable device inventory report.", "generated" },
+        { "registry_privacy_baseline.txt", "Registry privacy settings guide for review before import.", "generated" },
+        { "registry_privacy_baseline.reg", "Current-user registry privacy baseline.", "generated" },
+        { "registry_admin_policy_baseline.reg", "Optional Administrator machine-policy privacy baseline.", "generated" },
+        { "apply_registry_user_baseline.cmd", "Command template to import the current-user registry baseline.", "generated" },
     };
 
     return doc;
@@ -168,6 +180,7 @@ int main(int argc, char** argv) {
 
     SetupProbe::SecurityProbe security = SetupProbe::ProbeSecurity();
     SetupProbe::StorageProbe storage = SetupProbe::ProbeStorage();
+    SetupProbe::DeviceInventoryProbe inventory = SetupProbe::ProbeDeviceInventory();
     FreshPc::FreshReadiness readiness = FreshPc::Build(FreshPc::ProjectKind::Perm, security, storage);
 
     std::filesystem::path outputDir = SetupCommon::ResolveOutputDir(options.outputDir, "reinstall");
@@ -175,7 +188,7 @@ int main(int argc, char** argv) {
     std::filesystem::path jsonPath;
     std::string error;
 
-    if (!SetupCommon::WritePlanBundle(outputDir, "clean_reinstall_plan", BuildPlan(security, storage, readiness), textPath, jsonPath, error)) {
+    if (!SetupCommon::WritePlanBundle(outputDir, "clean_reinstall_plan", BuildPlan(security, storage, inventory, readiness), textPath, jsonPath, error)) {
         std::cerr << "[!] Failed to write setup plan: " << error << "\n";
         return 1;
     }
@@ -193,11 +206,32 @@ int main(int argc, char** argv) {
         std::cerr << "[!] Failed to write Fresh PC readiness report: " << error << "\n";
         return 1;
     }
+    if (!SetupCommon::WriteTextFile(outputDir / "device_inventory.txt",
+            SetupProbe::BuildDeviceInventoryText(inventory), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "device_inventory.json",
+            SetupProbe::BuildDeviceInventoryJson(inventory), error)) {
+        std::cerr << "[!] Failed to write device inventory report: " << error << "\n";
+        return 1;
+    }
+    if (!SetupCommon::WriteTextFile(outputDir / "registry_privacy_baseline.txt",
+            RegistryPrivacy::BuildGuideText(), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "registry_privacy_baseline.reg",
+            RegistryPrivacy::BuildUserRegFile(), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "registry_admin_policy_baseline.reg",
+            RegistryPrivacy::BuildAdminPolicyRegFile(), error) ||
+        !SetupCommon::WriteTextFile(outputDir / "apply_registry_user_baseline.cmd",
+            RegistryPrivacy::BuildApplyUserCommand(), error)) {
+        std::cerr << "[!] Failed to write registry privacy baseline: " << error << "\n";
+        return 1;
+    }
 
     SetupCommon::PrintGenerated(outputDir, textPath, jsonPath);
     std::cout << "  Hardware readiness: " << (outputDir / "hardware_readiness.txt").string() << "\n";
     std::cout << "  Fresh PC readiness: " << (outputDir / "fresh_pc_readiness.txt").string()
               << " (" << readiness.percent << "%)\n";
+    std::cout << "  Device inventory: " << (outputDir / "device_inventory.txt").string()
+              << " (" << inventory.devices.size() << " devices)\n";
+    std::cout << "  Registry baseline: " << (outputDir / "registry_privacy_baseline.txt").string() << "\n";
     std::cout << "  RAID detected: " << SetupProbe::YesNo(storage.raidDetected)
               << "  VMD detected: " << SetupProbe::YesNo(storage.vmdDetected)
               << "  TPM present: " << security.tpm.present << "\n";

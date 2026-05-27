@@ -92,6 +92,7 @@
     <ClInclude Include="..\common\setup_common.h" />
     <ClInclude Include="..\common\system_probe.h" />
     <ClInclude Include="..\common\fresh_pc_readiness.h" />
+    <ClInclude Include="..\common\registry_privacy_baseline.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
