@@ -1,0 +1,5 @@
+#include "resource.h"
+
+// Third-party provisioning binaries are intentionally not embedded in the
+// public source tree. Legacy provisioning remains quarantined behind the
+// --legacy-provisioning flag and should use locally supplied, trusted tools.

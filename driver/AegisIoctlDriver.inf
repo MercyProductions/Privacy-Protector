@@ -1,0 +1,45 @@
+;
+; AegisIoctlDriver.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+DriverVer=05/23/2026,0.1.0.0
+CatalogFile=AegisIoctlDriver.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 13
+AegisIoctlDriver_CopyFiles = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+AegisIoctlDriver.sys = 1,,
+
+[DefaultInstall.NTamd64]
+CopyFiles = AegisIoctlDriver_CopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService = AegisIoctlDriver,,AegisIoctlDriver_Service
+
+[AegisIoctlDriver_CopyFiles]
+AegisIoctlDriver.sys
+
+[AegisIoctlDriver_Service]
+DisplayName = %ServiceName%
+Description = %ServiceDescription%
+ServiceType = 1
+StartType = 3
+ErrorControl = 1
+ServiceBinary = %13%\AegisIoctlDriver.sys
+
+[Strings]
+ManufacturerName = "Aegis"
+DiskName = "Aegis IOCTL Driver Install Disk"
+ServiceName = "Aegis IOCTL Driver"
+ServiceDescription = "Safe IOCTL scaffold exposing ping and version requests only."

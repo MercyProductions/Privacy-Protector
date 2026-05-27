@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{cf1d4e1f-49e1-4e81-8f3d-662f9e86f72c}</UniqueIdentifier>
+      <Extensions>c;cpp;cxx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{bd94e73a-d1cd-4866-a4f0-a3f80de0e120}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx</Extensions>
+    </Filter>
+    <Filter Include="Driver Package">
+      <UniqueIdentifier>{dc83d813-01dd-441d-936b-f2ad4b5ea859}</UniqueIdentifier>
+      <Extensions>inf</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AegisIoctlDriver.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\aegis_ioctl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Inf Include="AegisIoctlDriver.inf">
+      <Filter>Driver Package</Filter>
+    </Inf>
+  </ItemGroup>
+</Project>
